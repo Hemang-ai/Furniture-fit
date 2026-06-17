@@ -1,0 +1,64 @@
+// FitVision AI — Prisma schema
+// Local dev uses SQLite. Structured to migrate to Postgres/Supabase later:
+// change `provider` to "postgresql" and point DATABASE_URL at the new database.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id               String   @id @default(cuid())
+  sourceUrl        String?
+  name             String
+  category         String
+  width            Float
+  height           Float
+  depth            Float
+  unit             String   @default("inches")
+  imageUrl         String?
+  // JSON serialized as text for SQLite portability.
+  rawExtractedJson String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  fitChecks FitCheck[]
+}
+
+model Measurement {
+  id                String   @id @default(cuid())
+  roomImagePath     String
+  // JSON-serialized array of normalized {x,y} polygon points.
+  polygonPointsJson String?
+  availableWidth    Float?
+  availableHeight   Float?
+  availableDepth    Float?
+  unit              String   @default("inches")
+  calibrationMethod String   @default("user_entered")
+  confidence        String   @default("MEDIUM")
+  createdAt         DateTime @default(now())
+
+  fitChecks FitCheck[]
+}
+
+model FitCheck {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  status        String   @default("pending")
+  roomImagePath String
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  measurementId String
+  measurement   Measurement @relation(fields: [measurementId], references: [id])
+
+  // JSON-serialized FitReport from lib/fitEngine.
+  fitReportJson        String?
+  generatedPreviewPath String?
+}

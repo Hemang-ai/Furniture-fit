@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800">
+  <defs>
+    <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#eef2f7"/>
+      <stop offset="1" stop-color="#dde5ee"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#wall)"/>
+  <rect y="560" width="1200" height="240" fill="#cbb79b"/>
+  <rect y="556" width="1200" height="8" fill="#b39e80"/>
+  <!-- cabinets -->
+  <rect x="80" y="360" width="280" height="200" fill="#f7fafc" stroke="#b9c3cf" stroke-width="3"/>
+  <rect x="840" y="360" width="280" height="200" fill="#f7fafc" stroke="#b9c3cf" stroke-width="3"/>
+  <!-- opening -->
+  <rect x="430" y="300" width="340" height="260" fill="#ffffff" stroke="#9aa6b2" stroke-width="3" stroke-dasharray="10 8"/>
+  <text x="600" y="440" font-family="system-ui, sans-serif" font-size="28" fill="#7b8794" text-anchor="middle">Sample room (seed)</text>
+  <text x="600" y="478" font-family="system-ui, sans-serif" font-size="18" fill="#9aa6b2" text-anchor="middle">marked opening</text>
+</svg>
