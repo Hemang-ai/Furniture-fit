@@ -73,15 +73,59 @@ export class LocalFileStorage implements FileStorage {
   }
 }
 
+/**
+ * Vercel Blob storage. Used in production (serverless filesystems are ephemeral).
+ * Auto-selected when BLOB_READ_WRITE_TOKEN is present or STORAGE_PROVIDER is
+ * "vercel-blob". Returns a public https URL, which works everywhere the app
+ * already accepts a path or URL (img tags, resolveImage, etc.).
+ */
+export class VercelBlobFileStorage implements FileStorage {
+  async save(input: SaveFileInput): Promise<string> {
+    const { put } = await import("@vercel/blob");
+    const name = `uploads/${randomName(safeExtension(input.filename, input.contentType))}`;
+    const { url } = await put(name, input.buffer, {
+      access: "public",
+      contentType: input.contentType,
+      addRandomSuffix: false,
+    });
+    return url;
+  }
+
+  async saveFromUrl(url: string): Promise<string> {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Failed to download image (${res.status})`);
+    }
+    const contentType = res.headers.get("content-type") ?? undefined;
+    const arrayBuffer = await res.arrayBuffer();
+    return this.save({
+      buffer: Buffer.from(arrayBuffer),
+      filename: path.basename(new URL(url).pathname) || "image.png",
+      contentType,
+    });
+  }
+}
+
+/** Which storage backend is active (after accounting for env). */
+export function getStorageProviderName(): "local" | "vercel-blob" {
+  const explicit = (process.env.STORAGE_PROVIDER ?? "").toLowerCase();
+  if (explicit === "local") return "local";
+  if (explicit === "vercel-blob") return "vercel-blob";
+  // Auto: use Blob when a token is configured (e.g. a Vercel Blob store is linked).
+  return process.env.BLOB_READ_WRITE_TOKEN ? "vercel-blob" : "local";
+}
+
 let storage: FileStorage | null = null;
 
 /**
- * Returns the configured FileStorage. Swap the implementation here (driven by
- * an env var) when moving to Vercel Blob / S3.
+ * Returns the configured FileStorage. Local disk by default; Vercel Blob when
+ * STORAGE_PROVIDER=vercel-blob or BLOB_READ_WRITE_TOKEN is set.
  */
 export function getFileStorage(): FileStorage {
   if (!storage) {
-    storage = new LocalFileStorage();
+    storage = getStorageProviderName() === "vercel-blob"
+      ? new VercelBlobFileStorage()
+      : new LocalFileStorage();
   }
   return storage;
 }

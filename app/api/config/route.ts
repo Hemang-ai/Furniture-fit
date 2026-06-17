@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getImageProviderName } from "@/lib/imageGeneration";
 import { getVisionProviderName } from "@/lib/aiVision";
+import { getStorageProviderName } from "@/lib/fileStorage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +22,9 @@ export async function GET() {
     vision: {
       requested: visionRequested,
       active: getVisionProviderName(),
+    },
+    storage: {
+      active: getStorageProviderName(),
     },
     keys: {
       openai: Boolean(process.env.OPENAI_API_KEY),

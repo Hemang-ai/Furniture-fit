@@ -171,29 +171,41 @@ checked.", "Electrical, water, and gas connections not checked."_
 > Prisma), so it **cannot** run on streamlit.app. Use a Node/Next.js host instead — **Vercel** is
 > recommended (built by the Next.js team).
 
+The repo is **deploy-ready** — the database provider and file storage adapt automatically to the
+environment, so there are no manual code edits for production:
+
+- **Database provider auto-detected** from `DATABASE_URL` by `scripts/set-prisma-provider.mjs`
+  (`file:` → SQLite locally, `postgresql://` → Postgres in prod). Runs on `postinstall` and in the
+  build, and is idempotent (no git noise).
+- **File storage auto-selected** in `lib/fileStorage.ts`: local disk by default, **Vercel Blob** when
+  `BLOB_READ_WRITE_TOKEN` is present (or `STORAGE_PROVIDER=vercel-blob`). Blob returns public URLs,
+  which the rest of the app already accepts everywhere a path/URL is used.
+- `vercel.json` applies the schema on deploy via `prisma db push`, so tables are created on first
+  build.
+
 ### Deploy to Vercel (recommended)
 
-1. Push this repo to GitHub (already done if you're reading this there).
-2. Go to [vercel.com/new](https://vercel.com/new) → **Import** this repository. Vercel auto-detects
-   Next.js.
-3. Add environment variables in the Vercel project settings (`DATABASE_URL`,
-   `IMAGE_GENERATION_PROVIDER`, `VISION_PROVIDER`, `OPENAI_API_KEY` / `GEMINI_API_KEY`, and any model
-   overrides). **Do not** use a SQLite `file:` URL in production (see below).
-4. Deploy.
+1. **Add a Postgres database** — e.g. Vercel Postgres, [Neon](https://neon.tech), or
+   [Supabase](https://supabase.com). Copy its connection string.
+2. **Add a Blob store** — in the Vercel project: **Storage → Create → Blob**. Vercel injects
+   `BLOB_READ_WRITE_TOKEN` automatically.
+3. Go to [vercel.com/new](https://vercel.com/new) → **Import** `Hemang-ai/Furniture-fit`
+   (or use the one-click link below). Vercel auto-detects Next.js and uses `vercel.json`.
+4. Set environment variables in the project settings:
+   - `DATABASE_URL` → your Postgres connection string (with `?sslmode=require` for Neon/Supabase)
+   - `IMAGE_GENERATION_PROVIDER`, `VISION_PROVIDER` → `mock` | `openai` | `gemini`
+   - `OPENAI_API_KEY` and/or `GEMINI_API_KEY` (if not using `mock`)
+   - (Optional) model overrides; `STORAGE_PROVIDER` is auto, no need to set it.
+5. **Deploy.** The build runs the provider script → `prisma generate` → `prisma db push` → `next build`.
 
-### Production changes required (serverless)
+One-click import: `https://vercel.com/new/clone?repository-url=https://github.com/Hemang-ai/Furniture-fit`
 
-The local MVP uses SQLite and writes uploads to `/public/uploads`. Serverless platforms have an
-**ephemeral, read-only-ish filesystem**, so for production:
+> **Note:** `vercel.json` uses `prisma db push --accept-data-loss` so the initial deploy creates the
+> schema non-interactively. For a long-lived production DB, switch to versioned migrations
+> (`prisma migrate deploy`) to avoid accidental destructive changes.
 
-- **Database:** switch Prisma to **Postgres** (e.g. Supabase / Neon). In `prisma/schema.prisma` set
-  `provider = "postgresql"` and point `DATABASE_URL` at the managed DB, then run `prisma migrate deploy`.
-- **File storage:** swap `lib/fileStorage.ts` from local disk to **Vercel Blob** or **S3** (the
-  `FileStorage` interface is the single seam — implement `save` / `saveFromUrl` and return the public
-  URL). Generated AI previews and uploads then persist.
-- Keep secrets in the host's env-var settings (never commit them).
-
-Other Node hosts (Render, Railway, Fly.io, Netlify) work too; the same DB + storage changes apply.
+Other Node hosts (Render, Railway, Fly.io) work too — provide a Postgres `DATABASE_URL` and a blob/S3
+store, set `STORAGE_PROVIDER`/token accordingly, and run `npm run db:push` once.
 
 ---
 
@@ -204,9 +216,11 @@ Other Node hosts (Render, Railway, Fly.io, Netlify) work too; the same DB + stor
 - Clearance rules are **typical assumptions**, not product-specific — always confirm the manual.
 - The URL parser is best-effort and does **not** bypass anti-bot protection; many retailers will
   block it, in which case enter details manually.
-- The default image preview is a **mock** (your original photo with a placeholder label).
-- Local file storage and SQLite are for development; move to managed storage + Postgres for
-  production.
+- The default image preview is a **mock** (your original photo with a placeholder label) unless an
+  OpenAI/Gemini provider + key is configured.
+- Local dev uses SQLite + local disk; production uses Postgres + Vercel Blob (auto-detected). The
+  Vercel build applies the schema with `prisma db push` — switch to `prisma migrate deploy` for a
+  versioned production migration history.
 
 ---
 

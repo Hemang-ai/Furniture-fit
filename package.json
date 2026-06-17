@@ -4,14 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "prisma:provider": "node scripts/set-prisma-provider.mjs",
+    "build": "node scripts/set-prisma-provider.mjs && prisma generate && next build",
     "start": "next start",
     "test": "jest",
     "test:watch": "jest --watch",
     "db:migrate": "prisma migrate dev",
+    "db:push": "node scripts/set-prisma-provider.mjs && prisma db push",
     "db:seed": "ts-node --project prisma/tsconfig.seed.json prisma/seed.ts",
     "db:studio": "prisma studio",
-    "postinstall": "prisma generate"
+    "postinstall": "node scripts/set-prisma-provider.mjs && prisma generate"
   },
   "prisma": {
     "seed": "ts-node --project prisma/tsconfig.seed.json prisma/seed.ts"
@@ -19,6 +21,7 @@
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
     "@prisma/client": "^5.22.0",
+    "@vercel/blob": "^2.4.0",
     "axios": "^1.7.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
