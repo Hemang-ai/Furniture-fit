@@ -141,7 +141,7 @@ provided). Generated images are **AI visualizations, not measurement guarantees*
 | `POST /api/parse-product`                  | `{ url }` → best-effort extracted product specs (for confirmation).  |
 | `POST /api/estimate-dimensions`            | AI estimate of product / available dimensions from the photo.        |
 | `GET /api/config`                          | Active AI providers + storage backend (no secrets).                  |
-| `GET /api/cleanup`                          | Deletes Blob uploads/previews older than `BLOB_TTL_MINUTES` (cron).  |
+| `GET /api/cleanup`                          | Deletes uploads/previews older than `STORAGE_TTL_MINUTES` (cron).    |
 | `POST /api/fit-check/create`               | `{ roomImagePath, product, measurement }` → computes + persists → `{ id, fitReport }`. |
 | `GET /api/fit-check/[id]`                   | Full fit check with parsed report.                                   |
 | `POST /api/fit-check/[id]/generate-preview`| Runs the image provider, persists `generatedPreviewPath` → `{ path }`. |
@@ -220,15 +220,16 @@ Other Node hosts (Render, Railway, Fly.io) work too — set a Postgres `DATABASE
 ### Ephemeral storage (auto-delete photos)
 
 Uploaded room photos and generated previews are meant to be **temporary**. `GET /api/cleanup`
-deletes Blob files older than `BLOB_TTL_MINUTES` (default 60) — so it can run as often as you like
-(e.g. every minute) without disturbing an in-progress fit check; it only reaps files past the TTL.
+deletes files older than `STORAGE_TTL_MINUTES` (default 60) from the active backend (**Supabase
+Storage** or **Vercel Blob**) — so it can run as often as you like (e.g. every minute) without
+disturbing an in-progress fit check; it only reaps files past the TTL.
 
 - **Vercel Cron** (`vercel.json`) calls it daily as a backstop. **The Hobby plan only allows
   once-per-day cron**, so for true minute-by-minute cleanup use an **external cron** (e.g.
   [cron-job.org](https://cron-job.org), free) hitting
   `https://<your-app>.vercel.app/api/cleanup` every minute.
 - Protect it: set `CRON_SECRET` and have the caller send `Authorization: Bearer <CRON_SECRET>`
-  (Vercel Cron adds this automatically). Set `BLOB_TTL_MINUTES` to control how long files live.
+  (Vercel Cron adds this automatically). Set `STORAGE_TTL_MINUTES` to control how long files live.
 - Trade-off: once a photo is reaped, older results pages won't show the image (the verdict,
   dimensions, and clearance data remain — those live in Postgres, not in the photo).
 
