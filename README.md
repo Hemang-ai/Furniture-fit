@@ -67,14 +67,22 @@ whether a big item fits a specific spot.
 
 ```bash
 npm install
-cp .env.example .env        # the Prisma CLI reads .env; Next.js reads it too
-npx prisma migrate dev --name init   # creates prisma/dev.db and runs the seed
-npm run db:seed             # (optional) re-run the seed any time
+cp .env.example .env                 # then set DATABASE_URL (see below)
+npm run db:migrate:deploy            # apply the schema to your Postgres DB
+npm run db:seed                      # (optional) seed four example fit checks
 npm run dev
 ```
 
-> The Prisma CLI loads `DATABASE_URL` from `.env`, so use `.env` for it. You can still
-> put machine-only secret overrides in `.env.local` (Next.js and the seed read both).
+**Database options for local dev** (the schema provider is PostgreSQL):
+
+- **Postgres (recommended, matches prod):** set `DATABASE_URL` to a Postgres URL — a free
+  [Neon](https://neon.tech)/[Supabase](https://supabase.com) dev database, or local Postgres. Then
+  `npm run db:migrate:deploy` (or `npm run db:push`).
+- **SQLite (zero-setup):** change `provider = "postgresql"` to `"sqlite"` in `prisma/schema.prisma`,
+  set `DATABASE_URL="file:./dev.db"`, and run `npm run db:push`. Use this only for local MVP work —
+  production must be Postgres.
+
+> The Prisma CLI loads `DATABASE_URL` from `.env`; Next.js also reads `.env.local`.
 
 Then open http://localhost:3000. The seed prints `/fit-check/<id>` URLs for four example results
 (FITS, TIGHT_FIT, FITS, DOES_NOT_FIT).
@@ -171,41 +179,42 @@ checked.", "Electrical, water, and gas connections not checked."_
 > Prisma), so it **cannot** run on streamlit.app. Use a Node/Next.js host instead — **Vercel** is
 > recommended (built by the Next.js team).
 
-The repo is **deploy-ready** — the database provider and file storage adapt automatically to the
-environment, so there are no manual code edits for production:
-
-- **Database provider auto-detected** from `DATABASE_URL` by `scripts/set-prisma-provider.mjs`
-  (`file:` → SQLite locally, `postgresql://` → Postgres in prod). Runs on `postinstall` and in the
-  build, and is idempotent (no git noise).
-- **File storage auto-selected** in `lib/fileStorage.ts`: local disk by default, **Vercel Blob** when
-  `BLOB_READ_WRITE_TOKEN` is present (or `STORAGE_PROVIDER=vercel-blob`). Blob returns public URLs,
-  which the rest of the app already accepts everywhere a path/URL is used.
-- `vercel.json` applies the schema on deploy via `prisma db push`, so tables are created on first
-  build.
+Production uses **PostgreSQL** (the schema provider) and **Vercel Blob** for file storage. The Vercel
+build runs `prisma generate && prisma migrate deploy && next build` (see `vercel.json`) — so the
+Prisma Client is generated and the committed migration in `prisma/migrations/` is applied to your
+database **without any destructive flags**. File storage auto-selects Vercel Blob when
+`BLOB_READ_WRITE_TOKEN` is present (`lib/fileStorage.ts`), else local disk.
 
 ### Deploy to Vercel (recommended)
 
-1. **Add a Postgres database** — e.g. Vercel Postgres, [Neon](https://neon.tech), or
-   [Supabase](https://supabase.com). Copy its connection string.
-2. **Add a Blob store** — in the Vercel project: **Storage → Create → Blob**. Vercel injects
-   `BLOB_READ_WRITE_TOKEN` automatically.
-3. Go to [vercel.com/new](https://vercel.com/new) → **Import** `Hemang-ai/Furniture-fit`
-   (or use the one-click link below). Vercel auto-detects Next.js and uses `vercel.json`.
-4. Set environment variables in the project settings:
-   - `DATABASE_URL` → your Postgres connection string (with `?sslmode=require` for Neon/Supabase)
-   - `IMAGE_GENERATION_PROVIDER`, `VISION_PROVIDER` → `mock` | `openai` | `gemini`
-   - `OPENAI_API_KEY` and/or `GEMINI_API_KEY` (if not using `mock`)
-   - (Optional) model overrides; `STORAGE_PROVIDER` is auto, no need to set it.
-5. **Deploy.** The build runs the provider script → `prisma generate` → `prisma db push` → `next build`.
+1. **Create a Postgres database** — e.g. Vercel Postgres, [Neon](https://neon.tech), or
+   [Supabase](https://supabase.com). Copy its connection string (use the **direct / non-pooling**
+   URL so migrations run cleanly).
+2. **Import the repo** at [vercel.com/new](https://vercel.com/new) → `Hemang-ai/Furniture-fit`
+   (Vercel auto-detects Next.js and uses `vercel.json`).
+3. **Add environment variables** — project **Settings → Environment Variables**. Add `DATABASE_URL`
+   (and the keys below) and **select both _Production_ and _Preview_** (and _Development_ if you use
+   `vercel env pull`):
+
+   | Name | Example / value |
+   | --- | --- |
+   | `DATABASE_URL` | `postgresql://USER:PASSWORD@HOST:PORT/DATABASE?sslmode=require` |
+   | `VISION_PROVIDER` / `IMAGE_GENERATION_PROVIDER` | `mock` \| `openai` \| `gemini` |
+   | `OPENAI_API_KEY` and/or `GEMINI_API_KEY` | (only if not using `mock`) |
+   | `BLOB_READ_WRITE_TOKEN` | auto-added when you do **Storage → Create → Blob** |
+
+4. **Add a Blob store** (optional but recommended so uploads/previews persist): project **Storage →
+   Create → Blob** — Vercel injects `BLOB_READ_WRITE_TOKEN` automatically.
+5. **Redeploy** (Deployments → ⋯ → Redeploy, or push a commit). The build generates the client and
+   applies migrations to your Postgres database.
 
 One-click import: `https://vercel.com/new/clone?repository-url=https://github.com/Hemang-ai/Furniture-fit`
 
-> **Note:** `vercel.json` uses `prisma db push --accept-data-loss` so the initial deploy creates the
-> schema non-interactively. For a long-lived production DB, switch to versioned migrations
-> (`prisma migrate deploy`) to avoid accidental destructive changes.
+> If you change the schema later, create a migration locally with `npm run db:migrate` and commit it;
+> the next deploy applies it via `prisma migrate deploy`. For ad-hoc syncing use `npm run db:push`.
 
-Other Node hosts (Render, Railway, Fly.io) work too — provide a Postgres `DATABASE_URL` and a blob/S3
-store, set `STORAGE_PROVIDER`/token accordingly, and run `npm run db:push` once.
+Other Node hosts (Render, Railway, Fly.io) work too — set a Postgres `DATABASE_URL`, run
+`npm run db:migrate:deploy`, and configure a blob/S3 store.
 
 ---
 
@@ -218,9 +227,9 @@ store, set `STORAGE_PROVIDER`/token accordingly, and run `npm run db:push` once.
   block it, in which case enter details manually.
 - The default image preview is a **mock** (your original photo with a placeholder label) unless an
   OpenAI/Gemini provider + key is configured.
-- Local dev uses SQLite + local disk; production uses Postgres + Vercel Blob (auto-detected). The
-  Vercel build applies the schema with `prisma db push` — switch to `prisma migrate deploy` for a
-  versioned production migration history.
+- The database is **PostgreSQL** (schema provider); production uses Postgres + Vercel Blob, and the
+  build applies migrations with `prisma migrate deploy`. SQLite remains a documented zero-setup local
+  option (flip the provider + `npm run db:push`).
 
 ---
 

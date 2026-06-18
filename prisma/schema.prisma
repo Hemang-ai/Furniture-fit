@@ -1,13 +1,15 @@
 // FitVision AI — Prisma schema
-// Local dev uses SQLite. Structured to migrate to Postgres/Supabase later:
-// change `provider` to "postgresql" and point DATABASE_URL at the new database.
+// Provider is PostgreSQL (used in production on Vercel and recommended locally).
+// DATABASE_URL is required (see .env.example). For a zero-setup local database
+// you may switch `provider` to "sqlite" and use DATABASE_URL="file:./dev.db",
+// then run `npm run db:push` — but production must use PostgreSQL.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

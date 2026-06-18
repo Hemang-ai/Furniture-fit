@@ -4,16 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prisma:provider": "node scripts/set-prisma-provider.mjs",
-    "build": "node scripts/set-prisma-provider.mjs && prisma generate && next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "test": "jest",
     "test:watch": "jest --watch",
+    "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
-    "db:push": "node scripts/set-prisma-provider.mjs && prisma db push",
+    "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "ts-node --project prisma/tsconfig.seed.json prisma/seed.ts",
     "db:studio": "prisma studio",
-    "postinstall": "node scripts/set-prisma-provider.mjs && prisma generate"
+    "postinstall": "prisma generate"
   },
   "prisma": {
     "seed": "ts-node --project prisma/tsconfig.seed.json prisma/seed.ts"
