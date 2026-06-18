@@ -112,6 +112,7 @@ export default function NewFitCheckPage() {
   const [roomPreview, setRoomPreview] = React.useState<string | null>(null);
   const [roomImagePath, setRoomImagePath] = React.useState<string | null>(null);
   const [uploading, setUploading] = React.useState(false);
+  const [storageMode, setStorageMode] = React.useState<"local" | "vercel-blob">("local");
   const [points, setPoints] = React.useState<NormalizedPoint[]>([]);
   const [productMode, setProductMode] = React.useState<"url" | "manual">("manual");
   const [urlToParse, setUrlToParse] = React.useState("");
@@ -161,7 +162,10 @@ export default function NewFitCheckPage() {
   React.useEffect(() => {
     fetch("/api/config")
       .then((r) => r.json())
-      .then((c) => setProviders({ vision: c.vision?.active ?? "mock", image: c.image?.active ?? "mock" }))
+      .then((c) => {
+        setProviders({ vision: c.vision?.active ?? "mock", image: c.image?.active ?? "mock" });
+        setStorageMode(c.storage?.active === "vercel-blob" ? "vercel-blob" : "local");
+      })
       .catch(() => setProviders({ vision: "mock", image: "mock" }));
   }, []);
 
@@ -185,12 +189,27 @@ export default function NewFitCheckPage() {
     }
   }
 
-  /** Upload the room file once and cache the server path. */
+  /**
+   * Upload the room file once and cache the resulting path/URL.
+   * - Vercel Blob: upload straight from the browser to Blob (bypasses the 4.5 MB
+   *   serverless request-body limit).
+   * - Local: POST to /api/upload (writes to /public/uploads).
+   */
   async function ensureRoomUploaded(): Promise<string | null> {
     if (roomImagePath) return roomImagePath;
     if (!roomFile) return null;
     setUploading(true);
     try {
+      if (storageMode === "vercel-blob") {
+        const { upload } = await import("@vercel/blob/client");
+        const blob = await upload(`uploads/${roomFile.name || "room.png"}`, roomFile, {
+          access: "public",
+          handleUploadUrl: "/api/upload/token",
+          contentType: roomFile.type || undefined,
+        });
+        setRoomImagePath(blob.url);
+        return blob.url;
+      }
       const fd = new FormData();
       fd.append("file", roomFile);
       const res = await fetch("/api/upload", { method: "POST", body: fd });
@@ -332,8 +351,10 @@ export default function NewFitCheckPage() {
       setSubmitError(null);
       try {
         await ensureRoomUploaded();
-      } catch {
-        setSubmitError("We couldn't upload that image. Try a different photo.");
+      } catch (e) {
+        setSubmitError(
+          e instanceof Error ? `Upload failed: ${e.message}` : "We couldn't upload that image."
+        );
         return;
       }
       setStep(2);

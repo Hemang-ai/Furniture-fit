@@ -38,9 +38,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ path });
   } catch (err) {
     console.error("Upload failed:", err);
-    return NextResponse.json(
-      { error: "Upload failed.", detail: err instanceof Error ? err.message : String(err) },
-      { status: 500 }
-    );
+    const raw = err instanceof Error ? err.message : String(err);
+    let friendly = "Upload failed. Please try again.";
+    if (/private store|public access/i.test(raw)) {
+      friendly =
+        "The Vercel Blob store is set to PRIVATE. Recreate it with public access (Storage → Blob), then redeploy.";
+    } else if (/EROFS|read-only|ENOENT/i.test(raw)) {
+      friendly =
+        "Storage is not writable here. Configure a Vercel Blob store (BLOB_READ_WRITE_TOKEN) for production.";
+    }
+    return NextResponse.json({ error: friendly }, { status: 500 });
   }
 }
