@@ -29,6 +29,11 @@ export async function GET() {
     keys: {
       openai: Boolean(process.env.OPENAI_API_KEY),
       gemini: Boolean(process.env.GEMINI_API_KEY),
+      blob: Boolean(process.env.BLOB_READ_WRITE_TOKEN),
+      supabase: Boolean(
+        (process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL) &&
+          process.env.SUPABASE_SERVICE_ROLE_KEY
+      ),
     },
   });
 }

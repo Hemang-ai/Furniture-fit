@@ -30,6 +30,7 @@ import {
   type NormalizedPoint,
 } from "@/components/ImageAnnotationCanvas";
 import { CATEGORY_OPTIONS, CONFIDENCE_OPTIONS } from "@/lib/schemas";
+import { compressImage } from "@/lib/imageCompress";
 import { cn } from "@/lib/utils";
 
 const reqNum = (msg = "Required") =>
@@ -112,7 +113,6 @@ export default function NewFitCheckPage() {
   const [roomPreview, setRoomPreview] = React.useState<string | null>(null);
   const [roomImagePath, setRoomImagePath] = React.useState<string | null>(null);
   const [uploading, setUploading] = React.useState(false);
-  const [storageMode, setStorageMode] = React.useState<"local" | "vercel-blob">("local");
   const [points, setPoints] = React.useState<NormalizedPoint[]>([]);
   const [productMode, setProductMode] = React.useState<"url" | "manual">("manual");
   const [urlToParse, setUrlToParse] = React.useState("");
@@ -164,7 +164,6 @@ export default function NewFitCheckPage() {
       .then((r) => r.json())
       .then((c) => {
         setProviders({ vision: c.vision?.active ?? "mock", image: c.image?.active ?? "mock" });
-        setStorageMode(c.storage?.active === "vercel-blob" ? "vercel-blob" : "local");
       })
       .catch(() => setProviders({ vision: "mock", image: "mock" }));
   }, []);
@@ -200,30 +199,12 @@ export default function NewFitCheckPage() {
     if (!roomFile) return null;
     setUploading(true);
     try {
-      // Resolve storage backend fresh to avoid racing the on-mount config fetch.
-      let mode = storageMode;
-      try {
-        const c = await (await fetch("/api/config")).json();
-        mode = c.storage?.active === "vercel-blob" ? "vercel-blob" : "local";
-        setStorageMode(mode);
-      } catch {
-        /* keep current mode */
-      }
-
-      if (mode === "vercel-blob") {
-        // Upload directly from the browser to Blob (no 4.5 MB serverless limit).
-        const { upload } = await import("@vercel/blob/client");
-        const blob = await upload(`uploads/${roomFile.name || "room.png"}`, roomFile, {
-          access: "public",
-          handleUploadUrl: "/api/upload/token",
-          contentType: roomFile.type || undefined,
-        });
-        setRoomImagePath(blob.url);
-        return blob.url;
-      }
-
+      // Downscale/compress in the browser so even big phone photos fit the
+      // serverless request-body limit. The server route persists to whatever
+      // backend is configured (Supabase / Vercel Blob / local disk).
+      const compressed = await compressImage(roomFile);
       const fd = new FormData();
-      fd.append("file", roomFile);
+      fd.append("file", compressed);
       const res = await fetch("/api/upload", { method: "POST", body: fd });
       if (!res.ok) {
         // Error bodies may be non-JSON (e.g. a 413 "Request Entity Too Large").
@@ -231,10 +212,7 @@ export default function NewFitCheckPage() {
         try {
           message = (await res.json()).error ?? message;
         } catch {
-          if (res.status === 413) {
-            message =
-              "Image is too large for server upload. Connect a PUBLIC Vercel Blob store so large photos upload directly from the browser.";
-          }
+          if (res.status === 413) message = "Image is too large to upload. Try a smaller photo.";
         }
         throw new Error(message);
       }

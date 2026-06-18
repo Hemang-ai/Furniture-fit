@@ -21,6 +21,7 @@
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
     "@prisma/client": "^5.22.0",
+    "@supabase/supabase-js": "^2.108.2",
     "@vercel/blob": "^2.4.0",
     "axios": "^1.7.9",
     "class-variance-authority": "^0.7.1",

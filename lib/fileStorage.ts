@@ -106,26 +106,84 @@ export class VercelBlobFileStorage implements FileStorage {
   }
 }
 
+/** Resolve Supabase Storage config from env (service-role, server-side only). */
+function supabaseStorageConfig(): { url: string; key: string; bucket: string } | null {
+  const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const bucket = process.env.SUPABASE_STORAGE_BUCKET ?? "uploads";
+  return url && key ? { url, key, bucket } : null;
+}
+
+/**
+ * Supabase Storage. Uploads to a public bucket (auto-created) and returns the
+ * public URL — works for browser display and for AI providers fetching by URL.
+ * Reuses the Supabase project you already use for Postgres.
+ */
+export class SupabaseFileStorage implements FileStorage {
+  async save(input: SaveFileInput): Promise<string> {
+    const cfg = supabaseStorageConfig();
+    if (!cfg) throw new Error("Supabase storage is not configured.");
+    const { createClient } = await import("@supabase/supabase-js");
+    const sb = createClient(cfg.url, cfg.key, { auth: { persistSession: false } });
+
+    // Ensure the bucket exists and is public.
+    const { data: buckets } = await sb.storage.listBuckets();
+    if (!buckets?.some((b) => b.name === cfg.bucket)) {
+      await sb.storage.createBucket(cfg.bucket, { public: true });
+    }
+
+    const name = `uploads/${randomName(safeExtension(input.filename, input.contentType))}`;
+    const { error } = await sb.storage
+      .from(cfg.bucket)
+      .upload(name, input.buffer, { contentType: input.contentType, upsert: false });
+    if (error) throw new Error(`Supabase upload failed: ${error.message}`);
+
+    return sb.storage.from(cfg.bucket).getPublicUrl(name).data.publicUrl;
+  }
+
+  async saveFromUrl(url: string): Promise<string> {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Failed to download image (${res.status})`);
+    const contentType = res.headers.get("content-type") ?? undefined;
+    const arrayBuffer = await res.arrayBuffer();
+    return this.save({
+      buffer: Buffer.from(arrayBuffer),
+      filename: path.basename(new URL(url).pathname) || "image.png",
+      contentType,
+    });
+  }
+}
+
 /** Which storage backend is active (after accounting for env). */
-export function getStorageProviderName(): "local" | "vercel-blob" {
+export function getStorageProviderName(): "local" | "vercel-blob" | "supabase" {
   const explicit = (process.env.STORAGE_PROVIDER ?? "").toLowerCase();
   if (explicit === "local") return "local";
   if (explicit === "vercel-blob") return "vercel-blob";
-  // Auto: use Blob when a token is configured (e.g. a Vercel Blob store is linked).
-  return process.env.BLOB_READ_WRITE_TOKEN ? "vercel-blob" : "local";
+  if (explicit === "supabase") return "supabase";
+  // Auto: prefer Vercel Blob, then Supabase Storage, else local disk.
+  if (process.env.BLOB_READ_WRITE_TOKEN) return "vercel-blob";
+  if (supabaseStorageConfig()) return "supabase";
+  return "local";
 }
 
 let storage: FileStorage | null = null;
 
 /**
- * Returns the configured FileStorage. Local disk by default; Vercel Blob when
- * STORAGE_PROVIDER=vercel-blob or BLOB_READ_WRITE_TOKEN is set.
+ * Returns the configured FileStorage. Local disk by default; Vercel Blob or
+ * Supabase Storage when their env is present.
  */
 export function getFileStorage(): FileStorage {
   if (!storage) {
-    storage = getStorageProviderName() === "vercel-blob"
-      ? new VercelBlobFileStorage()
-      : new LocalFileStorage();
+    switch (getStorageProviderName()) {
+      case "vercel-blob":
+        storage = new VercelBlobFileStorage();
+        break;
+      case "supabase":
+        storage = new SupabaseFileStorage();
+        break;
+      default:
+        storage = new LocalFileStorage();
+    }
   }
   return storage;
 }
