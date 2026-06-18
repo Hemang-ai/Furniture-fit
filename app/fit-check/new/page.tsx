@@ -200,7 +200,18 @@ export default function NewFitCheckPage() {
     if (!roomFile) return null;
     setUploading(true);
     try {
-      if (storageMode === "vercel-blob") {
+      // Resolve storage backend fresh to avoid racing the on-mount config fetch.
+      let mode = storageMode;
+      try {
+        const c = await (await fetch("/api/config")).json();
+        mode = c.storage?.active === "vercel-blob" ? "vercel-blob" : "local";
+        setStorageMode(mode);
+      } catch {
+        /* keep current mode */
+      }
+
+      if (mode === "vercel-blob") {
+        // Upload directly from the browser to Blob (no 4.5 MB serverless limit).
         const { upload } = await import("@vercel/blob/client");
         const blob = await upload(`uploads/${roomFile.name || "room.png"}`, roomFile, {
           access: "public",
@@ -210,12 +221,25 @@ export default function NewFitCheckPage() {
         setRoomImagePath(blob.url);
         return blob.url;
       }
+
       const fd = new FormData();
       fd.append("file", roomFile);
       const res = await fetch("/api/upload", { method: "POST", body: fd });
+      if (!res.ok) {
+        // Error bodies may be non-JSON (e.g. a 413 "Request Entity Too Large").
+        let message = `Upload failed (HTTP ${res.status}).`;
+        try {
+          message = (await res.json()).error ?? message;
+        } catch {
+          if (res.status === 413) {
+            message =
+              "Image is too large for server upload. Connect a PUBLIC Vercel Blob store so large photos upload directly from the browser.";
+          }
+        }
+        throw new Error(message);
+      }
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Upload failed.");
-      setRoomImagePath(json.path);
+      setRoomImagePath(json.path as string);
       return json.path as string;
     } finally {
       setUploading(false);
