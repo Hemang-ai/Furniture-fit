@@ -38,6 +38,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ path });
   } catch (err) {
     console.error("Upload failed:", err);
-    return NextResponse.json({ error: "Upload failed." }, { status: 500 });
+    return NextResponse.json(
+      { error: "Upload failed.", detail: err instanceof Error ? err.message : String(err) },
+      { status: 500 }
+    );
   }
 }
