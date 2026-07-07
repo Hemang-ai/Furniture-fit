@@ -32,12 +32,23 @@ export async function readPublicImage(publicPath: string): Promise<EncodedImage>
   return { base64, mimeType, dataUrl: `data:${mimeType};base64,${base64}`, buffer };
 }
 
+/** Max bytes we will inline into an AI request. */
+const MAX_INLINE_IMAGE_BYTES = 8 * 1024 * 1024;
+
 /** Download a remote image URL into the encoded forms. */
 export async function fetchImageAsEncoded(url: string): Promise<EncodedImage> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch image (${res.status})`);
-  const mimeType = res.headers.get("content-type")?.split(";")[0] ?? "image/png";
+  const mimeType = res.headers.get("content-type")?.split(";")[0]?.trim() ?? "image/png";
+  // Guard: users sometimes paste a product PAGE url instead of an image url.
+  // Inlining an HTML page as "image data" blows the model's token limit.
+  if (!mimeType.startsWith("image/")) {
+    throw new Error(`URL did not return an image (got ${mimeType}).`);
+  }
   const buffer = Buffer.from(await res.arrayBuffer());
+  if (buffer.length > MAX_INLINE_IMAGE_BYTES) {
+    throw new Error(`Image too large to inline (${buffer.length} bytes).`);
+  }
   const base64 = buffer.toString("base64");
   return { base64, mimeType, dataUrl: `data:${mimeType};base64,${base64}`, buffer };
 }

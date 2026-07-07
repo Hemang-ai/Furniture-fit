@@ -108,7 +108,7 @@ npm test        # Jest unit tests (fit engine)
 | `OPENAI_IMAGE_MODEL`        | `gpt-image-1`    | Optional override for the OpenAI image model.                                |
 | `OPENAI_VISION_MODEL`       | `gpt-4o-mini`    | Optional override for the OpenAI vision model.                               |
 | `GEMINI_IMAGE_MODEL`        | `gemini-2.5-flash-image` | Optional override for the Gemini image model.                |
-| `GEMINI_VISION_MODEL`       | `gemini-2.0-flash` | Optional override for the Gemini vision model.                             |
+| `GEMINI_VISION_MODEL`       | `gemini-2.5-flash` | Optional override for the Gemini vision model.                             |
 
 Never commit real secrets. Use `.env` / `.env.local` (both gitignored).
 
