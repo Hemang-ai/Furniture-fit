@@ -180,6 +180,7 @@ export class GeminiImageGenerationProvider implements ImageGenerationProvider {
       candidates?: Array<{
         content?: {
           parts?: Array<{
+            text?: string;
             inlineData?: { mimeType?: string; data?: string };
             inline_data?: { mime_type?: string; data?: string };
           }>;
@@ -200,6 +201,16 @@ export class GeminiImageGenerationProvider implements ImageGenerationProvider {
           contentType: mimeType,
         });
       }
+    }
+
+    // No image came back. The model usually explains why in a text part (e.g.
+    // "this photo doesn't show a room") — surface that instead of a mystery.
+    const modelText = responseParts
+      .map((p) => p.text ?? "")
+      .join(" ")
+      .trim();
+    if (modelText) {
+      throw new Error(`The AI could not generate a preview. It said: "${modelText.slice(0, 280)}"`);
     }
     throw new Error("Gemini returned no image data.");
   }

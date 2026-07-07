@@ -47,7 +47,10 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     console.error("Preview generation failed:", err);
     const raw = err instanceof Error ? err.message : String(err);
     let friendly = "Preview generation failed. Try again or check your provider settings.";
-    if (/\b429\b|quota|rate limit/i.test(raw)) {
+    if (/The AI could not generate a preview/i.test(raw)) {
+      // The model explained why (e.g. the photo doesn't show a room) — show that.
+      friendly = raw;
+    } else if (/\b429\b|quota|rate limit/i.test(raw)) {
       friendly =
         "AI provider quota exceeded (HTTP 429). Enable billing on your provider account, or set IMAGE_GENERATION_PROVIDER=mock to use the placeholder preview.";
     } else if (/\b404\b|not found|not supported/i.test(raw)) {
