@@ -136,6 +136,7 @@ function buildPrompt(request: VisionEstimationRequest): string {
     wantAvailable
       ? `Estimate the AVAILABLE SPACE (opening) dimensions in inches inside the marked area of the room photo. ` +
         `Marked area (normalized 0-1 polygon): ${area}. ` +
+        `Base the estimate on THAT marked region only — measure the real-world width and height the polygon spans, and infer the usable depth there; do not estimate a different spot. ` +
         `Use visual scale cues (counter height ~36in, door height ~80in, standard cabinet/tile sizes, outlets ~4.5in) to calibrate.`
       : "",
     request.productDimensions

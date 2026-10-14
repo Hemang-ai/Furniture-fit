@@ -101,7 +101,23 @@ export async function parseProductFromUrl(url: string): Promise<ParsedProduct> {
     if (ogImage) result.imageUrl = absolutize(ogImage, parsed);
   }
 
-  // 3) Visible dimension patterns ------------------------------------------
+  // 3) Embedded spec data (term/description JSON pairs + spec tables) -------
+  // Retailer PDPs (LG.com among them) ship their spec sheet as JSON inside the
+  // page even when the visible table is JS-rendered. Read it directly.
+  if (result.width === undefined || result.height === undefined || result.depth === undefined) {
+    const pairs = extractSpecPairs(html);
+    if (Object.keys(pairs).length > 0) raw.specPairs = pairs;
+    const dims = dimensionsFromSpecPairs(pairs);
+    if (dims) {
+      result.width = result.width ?? dims.width;
+      result.height = result.height ?? dims.height;
+      result.depth = result.depth ?? dims.depth;
+      if (dims.unit && !result.unit) result.unit = dims.unit;
+      result.notes.push("Dimensions read from the product page's specification data.");
+    }
+  }
+
+  // 4) Visible dimension patterns ------------------------------------------
   if (result.width === undefined || result.height === undefined || result.depth === undefined) {
     const dims = extractDimensionsFromText(html);
     if (dims) {
@@ -132,8 +148,145 @@ export async function parseProductFromUrl(url: string): Promise<ParsedProduct> {
   }
 
   if (!result.unit && hasAllDims) result.unit = "inches";
+
+  // Category inference ------------------------------------------------------
+  // Normalize whatever we saw (JSON-LD category text, product name, URL path)
+  // into one of the app's category slugs so the form select auto-fills.
+  const inferred = inferCategorySlug([result.category, result.name, parsed.pathname]);
+  if (inferred) {
+    result.category = inferred;
+    result.notes.push(`Category detected as "${inferred}" — change it if that's wrong.`);
+  } else {
+    result.category = undefined; // never pass free text the select can't hold
+    result.notes.push("Could not detect a category — please choose one.");
+  }
+
   result.raw = raw;
   return result;
+}
+
+/**
+ * Extract spec label/value pairs embedded in the page:
+ *  - JSON "description"/"term" pairs (either key order, escaped quotes handled)
+ *    as used by LG.com and similar JS-rendered PDPs
+ *  - generic <th|td>Label</..><td>Value</td> spec-table rows
+ */
+export function extractSpecPairs(html: string): Record<string, string> {
+  const specs: Record<string, string> = {};
+  const pairRe = /"description":"((?:[^"\\]|\\.)*)"\s*,\s*"term":"((?:[^"\\]|\\.)*)"/g;
+  let p: RegExpExecArray | null;
+  while ((p = pairRe.exec(html)) !== null) {
+    const value = unescapeJson(p[1]).trim();
+    const label = unescapeJson(p[2]).trim();
+    if (label && value && !specs[label]) specs[label] = value;
+  }
+  const pairRe2 = /"term":"((?:[^"\\]|\\.)*)"\s*,\s*"description":"((?:[^"\\]|\\.)*)"/g;
+  while ((p = pairRe2.exec(html)) !== null) {
+    const label = unescapeJson(p[1]).trim();
+    const value = unescapeJson(p[2]).trim();
+    if (label && value && !specs[label]) specs[label] = value;
+  }
+  const rowRe =
+    /<t[hd][^>]*>\s*([^<]{2,60}?)\s*<\/t[hd]>\s*<td[^>]*>\s*([^<]{1,60}?)\s*<\/td>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = rowRe.exec(html)) !== null) {
+    const label = decodeEntities(m[1]).trim();
+    const value = decodeEntities(m[2]).trim();
+    if (label && value && !specs[label]) specs[label] = value;
+  }
+  return specs;
+}
+
+function unescapeJson(s: string): string {
+  try {
+    return JSON.parse(`"${s}"`) as string;
+  } catch {
+    return s
+      .replace(/\\"/g, '"')
+      .replace(/\\u0026/g, "&")
+      .replace(/\\\//g, "/")
+      .replace(/\\\\/g, "\\");
+  }
+}
+
+/** Parse a spec value like `35.75"`, `35 3/4 in`, or `90.8 cm` into a number + unit. */
+function parseDimensionValue(value: string): { n: number; unit: string } | undefined {
+  const m = value.match(/(\d+(?:\.\d+)?)(?:\s+(\d+)\s*\/\s*(\d+))?/);
+  if (!m) return undefined;
+  let n = parseFloat(m[1]);
+  if (m[2] && m[3] && Number(m[3]) !== 0) n += Number(m[2]) / Number(m[3]);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  const unit = /\bcm\b/i.test(value) ? "cm" : /\bmm\b/i.test(value) ? "mm" : "inches";
+  return { n: Math.round(n * 100) / 100, unit };
+}
+
+/** Labels that describe packaging, not the product — never use these. */
+const EXCLUDED_LABEL = /carton|box|ship|package|packag|pallet|interior|shelf|screen/i;
+
+function pickSpec(
+  pairs: Record<string, string>,
+  priorities: RegExp[]
+): { n: number; unit: string } | undefined {
+  for (const re of priorities) {
+    for (const [label, value] of Object.entries(pairs)) {
+      if (EXCLUDED_LABEL.test(label)) continue;
+      if (re.test(label)) {
+        const parsed = parseDimensionValue(value);
+        if (parsed) return parsed;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Map extracted spec pairs to W/H/D. Specific product labels win; packaging
+ * ("Carton Dimensions") and interior measurements are excluded.
+ */
+export function dimensionsFromSpecPairs(
+  pairs: Record<string, string>
+): { width?: number; height?: number; depth?: number; unit?: string } | undefined {
+  if (Object.keys(pairs).length === 0) return undefined;
+  // Fit checks need the INSTALLED envelope: the tallest point (hinge) and the
+  // deepest point (handles), never door-open or hinge-cover partials.
+  const width = pickSpec(pairs, [/^width$/i, /^(product\s*)?width\b(?!.*door)/i]);
+  const height = pickSpec(pairs, [
+    /^height$/i,
+    /^height\s*to\s*top\s*of\s*(door\s*)?hinge/i,
+    /^height\s*\(?floor\s*to\s*top/i,
+    /^height\s*to\s*top\s*of\s*(case|cabinet)/i,
+    /^(product\s*)?height\b/i,
+  ]);
+  const depth = pickSpec(pairs, [
+    /^depth$/i,
+    /^depth\s*\(?with\s*handles?/i,
+    /^depth\s*\(?without\s*handles?/i,
+    /^(product\s*)?depth\b(?!.*(hinge|door))/i,
+  ]);
+  if (!width && !height && !depth) return undefined;
+  const unit = width?.unit ?? height?.unit ?? depth?.unit;
+  return { width: width?.n, height: height?.n, depth: depth?.n, unit };
+}
+
+/**
+ * Map free text (page category, product title, URL path) onto one of the
+ * category slugs used by the form select and the fit engine's clearance rules.
+ * Order matters: more specific appliance words are checked before broad ones.
+ */
+export function inferCategorySlug(sources: Array<string | undefined>): string | undefined {
+  const text = sources.filter(Boolean).join(" ").toLowerCase();
+  if (!text) return undefined;
+  if (/(refrigerat|fridge|freezer)/.test(text)) return "refrigerator";
+  if (/dishwash/.test(text)) return "dishwasher";
+  if (/(range|stove|oven|cooktop)/.test(text)) return "range";
+  // "washer-dryer" combos land on washer; check dryer first only when alone.
+  if (/wash(er|ing)/.test(text)) return "washer";
+  if (/dryer/.test(text)) return "dryer";
+  if (/(television|\btvs?\b|oled|qled)/.test(text)) return "tv";
+  if (/(sofa|couch|sectional|cabinet|dresser|wardrobe|bookcase|table|desk|furniture|mattress|bed\b)/.test(text))
+    return "furniture";
+  if (/(monitor|soundbar|speaker|console|electronics)/.test(text)) return "electronics";
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

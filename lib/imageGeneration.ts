@@ -44,16 +44,37 @@ export function buildPreviewPrompt(request: ImageGenerationRequest): string {
     ? `${request.productDimensions.width} x ${request.productDimensions.height} x ${request.productDimensions.depth} ${request.productDimensions.unit} (W x H x D)`
     : "unspecified dimensions";
   const area = request.polygonPoints?.length
-    ? request.polygonPoints.map((p) => `(${p.x.toFixed(3)}, ${p.y.toFixed(3)})`).join(", ")
-    : "the marked area";
+    ? `a polygon with normalized (0–1) vertices ${request.polygonPoints
+        .map((p) => `(${p.x.toFixed(3)}, ${p.y.toFixed(3)})`)
+        .join(", ")} marked by the shopper`
+    : "the most natural location for this product in the room";
+  const hasReference = Boolean(request.productImageUrl);
 
-  return [
-    `Place the product "${request.productName}" (${dims}) realistically into the marked area of the room photo.`,
-    `Marked area (normalized polygon coordinates): ${area}.`,
-    "Preserve the original room layout, cabinets, walls, lighting, perspective, and flooring.",
-    "Do not change room architecture. Match scale based on the provided dimensions.",
-    "This image is an AI visualization, not a measurement guarantee.",
-  ].join(" ");
+  return `You are generating a photorealistic product-placement preview for an e-commerce "Fit in My Space" feature.
+
+Use the uploaded room photo as the base image. Preserve the original room exactly: same camera angle, perspective, lighting direction, shadows, wall color, floor texture, furniture, reflections, depth of field, and image quality.
+
+Place the selected product into the user-selected placement area only.
+
+${
+  hasReference
+    ? "Use the real product image provided as the visual reference. Do not invent, redesign, stylize, or alter the product. Preserve the product's real shape, proportions, color, finish, door layout, handles, screen/panel details, logo and brand marks if visible, and material texture — it must be the exact same product and brand as the reference image."
+    : `No reference photo is available — render a typical, realistic "${request.productName}" without inventing visible brand logos.`
+}
+
+Product: "${request.productName}"
+Product dimensions: ${dims}
+Placement area: ${area}.
+
+Scale the product realistically using the product dimensions against visible real-world references (counters are typically 36 in tall, base cabinets 24 in deep, interior doors 80 in tall).
+
+The generated image must look like a real photo taken after the product was physically installed in the room. Match: camera perspective, lens distortion, distance from camera, product scale, lighting temperature, shadow softness, contact shadows on floor/wall, reflections on glossy surfaces, color tone and contrast, and the grain/noise/sharpness of the original photo.
+
+Do not make the product look pasted, floating, cartoonish, AI-generated, oversized, undersized, warped, or misaligned. If the product is partially behind counters, walls, or furniture, apply realistic occlusion. If the selected area is not suitable, still generate the closest realistic placement without breaking physical realism.
+
+Do not change the room layout except for placing the product. Do not remove existing objects unless they are inside the placement zone and must be replaced by the product. Do not add people, text, labels, stickers, arrows, banners, or UI elements.
+
+Final output: one realistic edited image showing the selected product accurately placed in the uploaded room photo. This image is an AI visualization, not a measurement guarantee.`;
 }
 
 /** Default provider: echoes the room image; UI labels it as a placeholder. */
@@ -82,27 +103,40 @@ export class OpenAIImageGenerationProvider implements ImageGenerationProvider {
     const room = await resolveImage(request.roomImagePath);
     if (!room) throw new Error("Could not read the room image for editing.");
 
-    const prompt = buildPreviewPrompt(request);
+    let prompt = buildPreviewPrompt(request);
     const form = new FormData();
     form.append("model", this.model);
-    form.append("prompt", prompt);
-    form.append("size", "1024x1024");
+    // gpt-image-1 accepts multiple input images via image[]; the first is the
+    // base scene. input_fidelity "high" preserves the input images' details —
+    // required so the exact product (brand, logo, finish) and the real room
+    // survive the edit instead of being re-imagined. Render quality defaults
+    // to "medium": roughly half the latency of "high" while input_fidelity
+    // still carries the product/room accuracy. Override with
+    // OPENAI_IMAGE_QUALITY=high when fidelity matters more than speed.
+    form.append("input_fidelity", "high");
+    form.append("quality", process.env.OPENAI_IMAGE_QUALITY?.trim() || "medium");
+    form.append("size", "auto");
+    // JPEG output downloads/stores faster than PNG with no visible loss here.
+    form.append("output_format", "jpeg");
+    form.append("output_compression", "90");
     form.append(
-      "image",
+      "image[]",
       new Blob([new Uint8Array(room.buffer)], { type: room.mimeType }),
-      "room.png"
+      room.mimeType === "image/jpeg" ? "room.jpg" : "room.png"
     );
-    // Optionally provide the product image as additional context.
     if (request.productImageUrl) {
       const product = await resolveImage(request.productImageUrl);
       if (product) {
         form.append(
           "image[]",
           new Blob([new Uint8Array(product.buffer)], { type: product.mimeType }),
-          "product.png"
+          product.mimeType === "image/jpeg" ? "product.jpg" : "product.png"
         );
+        prompt +=
+          "\n\nThe first input image is the room photo (base scene). The second input image is the exact product reference — replicate it faithfully.";
       }
     }
+    form.append("prompt", prompt);
 
     const res = await fetch("https://api.openai.com/v1/images/edits", {
       method: "POST",
@@ -120,8 +154,8 @@ export class OpenAIImageGenerationProvider implements ImageGenerationProvider {
     if (item?.b64_json) {
       return getFileStorage().save({
         buffer: Buffer.from(item.b64_json, "base64"),
-        filename: "preview.png",
-        contentType: "image/png",
+        filename: "preview.jpg",
+        contentType: "image/jpeg",
       });
     }
     if (item?.url) return getFileStorage().saveFromUrl(item.url);

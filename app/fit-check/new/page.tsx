@@ -242,6 +242,7 @@ export default function NewFitCheckPage() {
       }
       setValue("sourceUrl", data.sourceUrl ?? urlToParse.trim());
       if (data.name) setValue("name", data.name, { shouldValidate: true });
+      if (data.category) setValue("category", data.category, { shouldValidate: true });
       if (data.imageUrl) setValue("imageUrl", data.imageUrl);
       if (typeof data.width === "number") setValue("width", data.width, { shouldValidate: true });
       if (typeof data.height === "number")
@@ -300,6 +301,12 @@ export default function NewFitCheckPage() {
 
   /** Estimate the AVAILABLE SPACE with AI from the photo + marked area. */
   async function estimateAvailable() {
+    // The estimate is anchored to the user's marked area — without it the
+    // prediction would be a blind guess, so require the 4-point selection.
+    if (points.length < 4) {
+      setEstimateError("Select area where you want to place product");
+      return;
+    }
     setEstimatingAvailable(true);
     setEstimateError(null);
     try {
